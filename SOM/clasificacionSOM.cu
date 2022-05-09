@@ -30,6 +30,32 @@
 typedef LARGE_INTEGER timeStamp;
 double getTime();
 
+
+__global__ void kernel(TSOM* d_SOM, TPatrones* d_Patrones, int* solucion_P) {
+	const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+	float distanciaMenor = MAXDIST;
+
+	for (int h = 0; h < d_SOM->Alto; h++) {
+		for (int a = 0; a < d_SOM->Ancho; a++) {
+			float distancia = 0;
+			for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
+				for (int vx = -1;vx < 2;vx++)
+					if ((h + vy) >= 0 && (h + vy) < d_SOM->Alto && (a +vx) >= 0 && (a + vx) < d_SOM->Ancho)
+					{
+						for (int i = 0;i < d_Patrones->Dimension;i++)
+							distancia += abs(d_SOM->Neurona[h][a].pesos[i] - d_Patrones->Pesos[tid][i]);
+						distancia /= d_Patrones->Dimension;
+					}
+			if (distancia < distanciaMenor)
+			{
+				distanciaMenor = distancia;  // Neurona con menor distancia
+				solucion_P[tid] = d_SOM->Neurona[h][a].label;
+			}
+		}
+	}
+}
+
 /*----------------------------------------------------------------------------*/
 /*  FUNCION A PARALELIZAR  (versión secuencial-CPU)  				          */
 /*	Implementa la clasificación basada en SOM de un conjunto de patrones      */
@@ -73,7 +99,44 @@ int ClasificacionSOMCPU()
 
  int ClasificacionSOMGPU()
 {
+	TSOM* d_SOM;
+	TNeurona** d_Neuronas;
+	TPatrones* d_Patrones;
+	float** d_PesosPatrones;
+	int* solucion_P;
 
+	//Asignamos espacio para el mapa y lo copiamos
+	cudaMalloc(&d_SOM, sizeof(TSOM));
+	cudaMemcpy(d_SOM, &SOM, sizeof(TSOM), cudaMemcpyHostToDevice);
+	
+	//Asignamos y copiamos el array de neuronas
+	cudaMalloc(&d_Neuronas, SOM.Alto * sizeof(TNeurona*));
+	for (int i = 0; i < SOM.Alto; i++) {
+		cudaMalloc(&d_Neuronas[i], SOM.Ancho * sizeof(TNeurona));
+		for (int j = 0; j < SOM.Ancho; j++) {
+			cudaMalloc(&d_Neuronas[i][j].pesos, SOM.Dimension * sizeof(float));
+			cudaMemcpy(d_Neuronas[i][j].pesos, SOM.Neurona[i][j].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice);
+			cudaMemcpy(&d_Neuronas[i][j].label, &SOM.Neurona[i][j].label, sizeof(int), cudaMemcpyHostToDevice);
+		}
+	}
+	//Cambiamos el puntero del som para que apunte al array de neuronas de la gpu
+	d_SOM->Neurona = d_Neuronas;
+	//Asignamos y copiamos los patrones
+	cudaMalloc(&d_Patrones, sizeof(TPatrones));
+	cudaMemcpy(d_Patrones, &Patrones, sizeof(TPatrones), cudaMemcpyHostToDevice);
+	cudaMalloc(&d_PesosPatrones, Patrones.Cantidad * sizeof(float*));
+	for (int i = 0; i < Patrones.Cantidad; i++) {
+		cudaMalloc(&d_PesosPatrones[i], Patrones.Dimension * sizeof(float));
+		for (int j = 0; j < Patrones.Dimension; j++) {
+			cudaMemcpy(&d_PesosPatrones[i][j], &Patrones.Pesos[i][j], sizeof(float), cudaMemcpyHostToDevice);
+		}
+	}
+	d_Patrones->Pesos = d_PesosPatrones;
+	//Asignamos espacio para la solución
+	cudaMalloc(&solucion_P, Patrones.Cantidad * sizeof(int));
+
+
+	cudaMemcpy(EtiquetaGPU, &solucion_P, (Patrones.Cantidad * sizeof(int)), cudaMemcpyDeviceToHost);
 
 	 return OKCLAS;
 }

@@ -17,10 +17,18 @@
     <CudaCompile Include="clasificacionSOM.cu" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="grande.pat" />
-    <None Include="grande.som" />
-    <None Include="peq.pat" />
-    <None Include="peq.som" />
+    <CopyFileToFolders Include="grande.pat">
+      <FileType>Document</FileType>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="grande.som">
+      <FileType>Document</FileType>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="peq.pat">
+      <FileType>Document</FileType>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="peq.som">
+      <FileType>Document</FileType>
+    </CopyFileToFolders>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{99EF2D13-7E65-4F83-9A4E-C05B2E04003B}</ProjectGuid>
