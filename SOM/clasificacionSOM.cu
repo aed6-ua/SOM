@@ -101,37 +101,33 @@ int ClasificacionSOMCPU()
 {
 	TSOM* d_SOM;
 	TNeurona** d_Neuronas;
-	TPatrones* d_Patrones;
-	float** d_PesosPatrones;
+	TNeurona** h_Neuronas;
+	float** d_Patrones;
+	float** h_Patrones;
 	int* solucion_P;
 
-	//Asignamos espacio para el mapa y lo copiamos
-	cudaMalloc(&d_SOM, sizeof(TSOM));
-	cudaMemcpy(d_SOM, &SOM, sizeof(TSOM), cudaMemcpyHostToDevice);
-	
+
+	h_Neuronas = (TNeurona**)malloc(SOM.Alto * sizeof(TNeurona*));
 	//Asignamos y copiamos el array de neuronas
 	cudaMalloc(&d_Neuronas, SOM.Alto * sizeof(TNeurona*));
+
 	for (int i = 0; i < SOM.Alto; i++) {
-		cudaMalloc(&d_Neuronas[i], SOM.Ancho * sizeof(TNeurona));
+		cudaMalloc(&h_Neuronas[i], SOM.Ancho * sizeof(TNeurona));
 		for (int j = 0; j < SOM.Ancho; j++) {
-			cudaMalloc(&d_Neuronas[i][j].pesos, SOM.Dimension * sizeof(float));
-			cudaMemcpy(d_Neuronas[i][j].pesos, SOM.Neurona[i][j].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice);
-			cudaMemcpy(&d_Neuronas[i][j].label, &SOM.Neurona[i][j].label, sizeof(int), cudaMemcpyHostToDevice);
+			cudaMemcpy(&h_Neuronas[i][j], &SOM.Neurona[i][j], sizeof(TNeurona), cudaMemcpyHostToDevice);
 		}
 	}
-	//Cambiamos el puntero del som para que apunte al array de neuronas de la gpu
-	d_SOM->Neurona = d_Neuronas;
+	cudaMemcpy(d_Neuronas, h_Neuronas, SOM.Alto * sizeof(TNeurona), cudaMemcpyHostToDevice);
 	//Asignamos y copiamos los patrones
-	cudaMalloc(&d_Patrones, sizeof(TPatrones));
-	cudaMemcpy(d_Patrones, &Patrones, sizeof(TPatrones), cudaMemcpyHostToDevice);
-	cudaMalloc(&d_PesosPatrones, Patrones.Cantidad * sizeof(float*));
+	h_Patrones = (float**)malloc(Patrones.Cantidad * sizeof(float*));
+	cudaMalloc(&d_Patrones, Patrones.Cantidad * sizeof(float*));
 	for (int i = 0; i < Patrones.Cantidad; i++) {
-		cudaMalloc(&d_PesosPatrones[i], Patrones.Dimension * sizeof(float));
+		cudaMalloc(&h_Patrones[i], Patrones.Dimension * sizeof(float));
 		for (int j = 0; j < Patrones.Dimension; j++) {
-			cudaMemcpy(&d_PesosPatrones[i][j], &Patrones.Pesos[i][j], sizeof(float), cudaMemcpyHostToDevice);
+			cudaMemcpy(&h_Patrones[i][j], &Patrones.Pesos[i][j], sizeof(float), cudaMemcpyHostToDevice);
 		}
 	}
-	d_Patrones->Pesos = d_PesosPatrones;
+	cudaMemcpy(d_Patrones, h_Patrones, Patrones.Cantidad * sizeof(float*), cudaMemcpyHostToDevice);
 	//Asignamos espacio para la solución
 	cudaMalloc(&solucion_P, Patrones.Cantidad * sizeof(int));
 
