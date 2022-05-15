@@ -31,26 +31,26 @@ typedef LARGE_INTEGER timeStamp;
 double getTime();
 
 
-__global__ void kernel(TSOM* d_SOM, TPatrones* d_Patrones, int* solucion_P) {
-	const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension) {
+	const int tid = blockIdx.x * blockDim.x + threadIdx.x; //Cada bloque es un patrón
 
 	float distanciaMenor = MAXDIST;
 
-	for (int h = 0; h < d_SOM->Alto; h++) {
-		for (int a = 0; a < d_SOM->Ancho; a++) {
+	for (int h = 0; h < alto; h++) {	
+		for (int a = 0; a < ancho; a++) {
 			float distancia = 0;
 			for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
 				for (int vx = -1;vx < 2;vx++)
-					if ((h + vy) >= 0 && (h + vy) < d_SOM->Alto && (a +vx) >= 0 && (a + vx) < d_SOM->Ancho)
+					if ((h + vy) >= 0 && (h + vy) < alto && (a +vx) >= 0 && (a + vx) < ancho)
 					{
-						for (int i = 0;i < d_Patrones->Dimension;i++)
-							distancia += abs(d_SOM->Neurona[h][a].pesos[i] - d_Patrones->Pesos[tid][i]);
-						distancia /= d_Patrones->Dimension;
+						for (int i = 0;i < dimension;i++)
+							distancia += abs(d_Neuronas[h][a].pesos[i] - d_Patrones[tid][i]);
+						distancia /= dimension;
 					}
 			if (distancia < distanciaMenor)
 			{
 				distanciaMenor = distancia;  // Neurona con menor distancia
-				solucion_P[tid] = d_SOM->Neurona[h][a].label;
+				solucion_P[tid] = d_Neuronas[h][a].label;
 			}
 		}
 	}
@@ -99,11 +99,15 @@ int ClasificacionSOMCPU()
 
  int ClasificacionSOMGPU()
 {
-	TSOM* d_SOM;
+
 	TNeurona** d_Neuronas;
 	TNeurona** h_Neuronas;
+	TNeurona* d_NeuronasRow;
+	TNeurona d_Neurona;
+	int d_label;
 	float** d_Patrones;
 	float** h_Patrones;
+	float* d_PatronesPesos;
 	int* solucion_P;
 
 
@@ -112,27 +116,53 @@ int ClasificacionSOMCPU()
 	cudaMalloc(&d_Neuronas, SOM.Alto * sizeof(TNeurona*));
 
 	for (int i = 0; i < SOM.Alto; i++) {
-		cudaMalloc(&h_Neuronas[i], SOM.Ancho * sizeof(TNeurona));
+		h_Neuronas[i] = (TNeurona*)malloc(SOM.Ancho * sizeof(TNeurona));
+		cudaMalloc(&d_NeuronasRow, SOM.Ancho * sizeof(TNeurona));
 		for (int j = 0; j < SOM.Ancho; j++) {
-			cudaMemcpy(&h_Neuronas[i][j], &SOM.Neurona[i][j], sizeof(TNeurona), cudaMemcpyHostToDevice);
+			cudaMalloc(&d_Neurona.pesos, SOM.Dimension * sizeof(float));
+			cudaMemcpy(&d_Neurona.pesos, SOM.Neurona[i][j].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice);
+			d_Neurona.label = SOM.Neurona[i][j].label;
+			h_Neuronas[i][j] = d_Neurona;
 		}
+		cudaMemcpy(d_NeuronasRow, h_Neuronas[i], SOM.Ancho * sizeof(TNeurona), cudaMemcpyHostToDevice);
 	}
 	cudaMemcpy(d_Neuronas, h_Neuronas, SOM.Alto * sizeof(TNeurona), cudaMemcpyHostToDevice);
 	//Asignamos y copiamos los patrones
 	h_Patrones = (float**)malloc(Patrones.Cantidad * sizeof(float*));
 	cudaMalloc(&d_Patrones, Patrones.Cantidad * sizeof(float*));
 	for (int i = 0; i < Patrones.Cantidad; i++) {
-		cudaMalloc(&h_Patrones[i], Patrones.Dimension * sizeof(float));
-		for (int j = 0; j < Patrones.Dimension; j++) {
-			cudaMemcpy(&h_Patrones[i][j], &Patrones.Pesos[i][j], sizeof(float), cudaMemcpyHostToDevice);
-		}
+		cudaMalloc(&d_PatronesPesos, Patrones.Dimension * sizeof(float));
+		cudaMemcpy(&d_PatronesPesos, &Patrones.Pesos[i], Patrones.Dimension * sizeof(float), cudaMemcpyHostToDevice);
+		h_Patrones[i] = d_PatronesPesos;
 	}
 	cudaMemcpy(d_Patrones, h_Patrones, Patrones.Cantidad * sizeof(float*), cudaMemcpyHostToDevice);
 	//Asignamos espacio para la solución
 	cudaMalloc(&solucion_P, Patrones.Cantidad * sizeof(int));
 
+	dim3 block(SOM.Alto * SOM.Ancho);
+	dim3 grid(Patrones.Cantidad);
+
+	kernel << <grid, block >> > (d_Neuronas, d_Patrones, solucion_P, SOM.Alto, SOM.Ancho, SOM.Dimension);
 
 	cudaMemcpy(EtiquetaGPU, &solucion_P, (Patrones.Cantidad * sizeof(int)), cudaMemcpyDeviceToHost);
+
+
+	for (int i = 0; i < SOM.Alto; i++) {
+		for (int j = 0; j < SOM.Ancho; j++) {
+			cudaFree(&h_Neuronas[i][j].pesos);
+		}
+		cudaFree(&h_Neuronas[i]);
+	}
+	cudaFree(&d_Neuronas);
+	free(h_Neuronas);
+	
+	for (int i = 0; i < Patrones.Cantidad; i++) {
+		cudaFree(&h_Patrones[i]);
+	}
+	cudaFree(&d_Patrones);
+	free(h_Patrones);
+
+	cudaFree(solucion_P);
 
 	 return OKCLAS;
 }
