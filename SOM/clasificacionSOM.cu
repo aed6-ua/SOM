@@ -32,28 +32,39 @@ double getTime();
 
 
 __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension) {
-	const int tid = blockIdx.x * blockDim.x + threadIdx.x; //Cada bloque es un patrón
+	const int tid = blockIdx.x; //Cada bloque es un patrón
 
 	float distanciaMenor = MAXDIST;
+
+
 
 	for (int h = 0; h < alto; h++) {	
 		for (int a = 0; a < ancho; a++) {
 			float distancia = 0;
+			if (h >= 0 && h < SOM.Alto && a >= 0 && a < SOM.Ancho)
+			{
+				for (int i = 0;i < Patrones.Dimension;i++)
+					distancia += abs(d_Neuronas[h][a].pesos[i] - d_Patrones[tid][i]);
+				distancia /= Patrones.Dimension;
+			}
 			for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
 				for (int vx = -1;vx < 2;vx++)
-					if ((h + vy) >= 0 && (h + vy) < alto && (a +vx) >= 0 && (a + vx) < ancho)
-					{
-						for (int i = 0;i < dimension;i++)
-							distancia += abs(d_Neuronas[h][a].pesos[i] - d_Patrones[tid][i]);
-						distancia /= dimension;
-					}
+					if (vx != 0 && vy != 0)         // No comprobar con la misma neurona
+						distancia += CalculaDistancia(y + vy, x + vx, np);
 			if (distancia < distanciaMenor)
 			{
 				distanciaMenor = distancia;  // Neurona con menor distancia
-				solucion_P[tid] = d_Neuronas[h][a].label;
+				EtiquetaCPU[np] = SOM.Neurona[y][x].label;
 			}
 		}
 	}
+	
+	/*
+	for (int i = 0; i < alto; i++) {
+		for (int j = 0; j < ancho; j++) {
+			solucion_P[(i * ancho) + j] = d_Neuronas[i][j].label;
+		}
+	}*/
 }
 
 /*----------------------------------------------------------------------------*/
@@ -99,70 +110,53 @@ int ClasificacionSOMCPU()
 
  int ClasificacionSOMGPU()
 {
+	 TNeurona** d_SOM;
+	 
+	 int* d_Solucion;
+	 float** d_Patrones;
 
-	TNeurona** d_Neuronas;
-	TNeurona** h_Neuronas;
-	TNeurona* d_NeuronasRow;
-	TNeurona d_Neurona;
-	int d_label;
-	float** d_Patrones;
-	float** h_Patrones;
-	float* d_PatronesPesos;
-	int* solucion_P;
-
-
-	h_Neuronas = (TNeurona**)malloc(SOM.Alto * sizeof(TNeurona*));
-	//Asignamos y copiamos el array de neuronas
-	cudaMalloc(&d_Neuronas, SOM.Alto * sizeof(TNeurona*));
-
-	for (int i = 0; i < SOM.Alto; i++) {
-		h_Neuronas[i] = (TNeurona*)malloc(SOM.Ancho * sizeof(TNeurona));
-		cudaMalloc(&d_NeuronasRow, SOM.Ancho * sizeof(TNeurona));
-		for (int j = 0; j < SOM.Ancho; j++) {
-			cudaMalloc(&d_Neurona.pesos, SOM.Dimension * sizeof(float));
-			cudaMemcpy(&d_Neurona.pesos, SOM.Neurona[i][j].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice);
-			d_Neurona.label = SOM.Neurona[i][j].label;
-			h_Neuronas[i][j] = d_Neurona;
-		}
-		cudaMemcpy(d_NeuronasRow, h_Neuronas[i], SOM.Ancho * sizeof(TNeurona), cudaMemcpyHostToDevice);
-	}
-	cudaMemcpy(d_Neuronas, h_Neuronas, SOM.Alto * sizeof(TNeurona), cudaMemcpyHostToDevice);
-	//Asignamos y copiamos los patrones
-	h_Patrones = (float**)malloc(Patrones.Cantidad * sizeof(float*));
-	cudaMalloc(&d_Patrones, Patrones.Cantidad * sizeof(float*));
-	for (int i = 0; i < Patrones.Cantidad; i++) {
-		cudaMalloc(&d_PatronesPesos, Patrones.Dimension * sizeof(float));
-		cudaMemcpy(&d_PatronesPesos, &Patrones.Pesos[i], Patrones.Dimension * sizeof(float), cudaMemcpyHostToDevice);
-		h_Patrones[i] = d_PatronesPesos;
-	}
-	cudaMemcpy(d_Patrones, h_Patrones, Patrones.Cantidad * sizeof(float*), cudaMemcpyHostToDevice);
-	//Asignamos espacio para la solución
-	cudaMalloc(&solucion_P, Patrones.Cantidad * sizeof(int));
-
-	dim3 block(SOM.Alto * SOM.Ancho);
-	dim3 grid(Patrones.Cantidad);
-
-	kernel << <grid, block >> > (d_Neuronas, d_Patrones, solucion_P, SOM.Alto, SOM.Ancho, SOM.Dimension);
-
-	cudaMemcpy(EtiquetaGPU, &solucion_P, (Patrones.Cantidad * sizeof(int)), cudaMemcpyDeviceToHost);
+	 ERROR_CHECK(cudaMalloc((void**)&d_SOM, SOM.Alto * sizeof(TNeurona*)));
+	 TNeurona** temp_d_som = (TNeurona**)malloc(sizeof(TNeurona*) * SOM.Alto);
+	 for (int j = 0; j < SOM.Alto; j++) {
+		 ERROR_CHECK(cudaMalloc((void**)&temp_d_som[j], SOM.Ancho * sizeof(TNeurona)));
+		 TNeurona* temp_d_ne = (TNeurona*)malloc(sizeof(TNeurona) * SOM.Ancho);
+		 for (int i = 0; i < SOM.Ancho; i++) {
+			 ERROR_CHECK(cudaMalloc((void**)& temp_d_ne[i].pesos, SOM.Dimension * sizeof(float)));
+			 ERROR_CHECK(cudaMemcpy(temp_d_ne[i].pesos, SOM.Neurona[j][i].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice));
+			 temp_d_ne[i].label = SOM.Neurona[j][i].label;
+		 }
+		 ERROR_CHECK(cudaMemcpy(temp_d_som[j], temp_d_ne, SOM.Ancho * sizeof(TNeurona), cudaMemcpyHostToDevice));
+		 free(temp_d_ne);
+	 }
+	 ERROR_CHECK(cudaMemcpy(d_SOM, temp_d_som, SOM.Alto * sizeof(TNeurona*), cudaMemcpyHostToDevice));
+	 free(temp_d_som);
 
 
-	for (int i = 0; i < SOM.Alto; i++) {
-		for (int j = 0; j < SOM.Ancho; j++) {
-			cudaFree(&h_Neuronas[i][j].pesos);
-		}
-		cudaFree(&h_Neuronas[i]);
-	}
-	cudaFree(&d_Neuronas);
-	free(h_Neuronas);
-	
-	for (int i = 0; i < Patrones.Cantidad; i++) {
-		cudaFree(&h_Patrones[i]);
-	}
-	cudaFree(&d_Patrones);
-	free(h_Patrones);
+	 ERROR_CHECK(cudaMalloc((void**)&d_Solucion, Patrones.Cantidad * sizeof(int)));
+	 
 
-	cudaFree(solucion_P);
+	 
+	 ERROR_CHECK(cudaMalloc((void**) & d_Patrones, Patrones.Cantidad * sizeof(float*)));
+	 float** temp_d_ptrs = (float**)malloc(sizeof(float*) * Patrones.Cantidad);
+	 for (int i = 0; i < Patrones.Cantidad; i++) {
+		 ERROR_CHECK(cudaMalloc((void**) &temp_d_ptrs[i], Patrones.Dimension * sizeof(float)));
+		 ERROR_CHECK(cudaMemcpy(temp_d_ptrs[i], Patrones.Pesos[i], Patrones.Dimension * sizeof(float), cudaMemcpyHostToDevice));
+	 }
+	 ERROR_CHECK(cudaMemcpy(d_Patrones, temp_d_ptrs, sizeof(float*) * Patrones.Cantidad, cudaMemcpyHostToDevice));
+	 free(temp_d_ptrs);
+	 
+	 
+
+	 dim3 block(1);
+	 dim3 grid(Patrones.Cantidad);
+
+	 kernel << <grid, 1 >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, SOM.Dimension);
+
+
+	 ERROR_CHECK(cudaMemcpy(EtiquetaGPU, d_Solucion, (Patrones.Cantidad * sizeof(int)), cudaMemcpyDeviceToHost));
+	 cudaFree(d_SOM);
+	 cudaFree(d_Patrones);
+	 cudaFree(d_Solucion);
 
 	 return OKCLAS;
 }
@@ -247,7 +241,7 @@ runTest(int argc, char** argv)
 		if ((EtiquetaCPU[i] != EtiquetaGPU[i]))
 		{
 			comprobar = ERRORCLASS;
-			fprintf(stderr, "Fallo en la clasificacion del patron %d, valor correcto %d\n", i, EtiquetaCPU[i]);
+			fprintf(stderr, "Fallo en la clasificacion del patron %d, valor correcto %d, valor dado %d\n", i, EtiquetaCPU[i], EtiquetaGPU[i]);
 		}
 	}
 	// Impresion de resultados
