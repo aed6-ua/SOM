@@ -31,34 +31,46 @@ typedef LARGE_INTEGER timeStamp;
 double getTime();
 
 
-__global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension) {
+__device__ float CalculaDistanciaGPU(int y, int x, int np, TNeurona** d_Neuronas, float** d_Patrones, int dimension, int alto, int ancho) {
+	float distancia = 0;
+	if (y >= 0 && y < alto && x >= 0 && x < ancho)
+	{
+		for (int i = 0;i < dimension;i++)
+			distancia += fabs(d_Neuronas[y][x].pesos[i] - d_Patrones[np][i]);
+		distancia /= dimension;
+	}
+	return distancia;
+}
+
+__global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension, int cantidad) {
 	const int tid = blockIdx.x; //Cada bloque es un patrón
-
+	float distancia;
 	float distanciaMenor = MAXDIST;
+	float dist;
 
+	//Solución de la cpu tal cual (menos recorrero los patrones ya que cada bloque es un patrón)
+		for (int y = 0; y < alto; y++) {
+			for (int x = 0; x < ancho; x++) {
 
+				for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
+					for (int vx = -1;vx < 2;vx++)
 
-	for (int h = 0; h < alto; h++) {	
-		for (int a = 0; a < ancho; a++) {
-			float distancia = 0;
-			if (h >= 0 && h < SOM.Alto && a >= 0 && a < SOM.Ancho)
-			{
-				for (int i = 0;i < Patrones.Dimension;i++)
-					distancia += abs(d_Neuronas[h][a].pesos[i] - d_Patrones[tid][i]);
-				distancia /= Patrones.Dimension;
-			}
-			for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
-				for (int vx = -1;vx < 2;vx++)
-					if (vx != 0 && vy != 0)         // No comprobar con la misma neurona
-						distancia += CalculaDistancia(y + vy, x + vx, np);
-			if (distancia < distanciaMenor)
-			{
-				distanciaMenor = distancia;  // Neurona con menor distancia
-				EtiquetaCPU[np] = SOM.Neurona[y][x].label;
+						//Función de CalculaDistancia (me he saltado la parte de calcular primero la neurona y luego la vecindad y lo calculo todo junto)
+						dist = 0;
+						if (y >= 0 && y < alto && x >= 0 && x < ancho)
+						{
+							for (int i = 0;i < dimension;i++)
+								dist += fabs(d_Neuronas[y][x].pesos[i] - d_Patrones[tid][i]);
+							dist /= dimension;
+						}
+
+				if (distancia < distanciaMenor)
+				{
+					distanciaMenor = distancia;  // Neurona con menor distancia
+					solucion_P[tid] = d_Neuronas[y][x].label;
+				}
 			}
 		}
-	}
-	
 	/*
 	for (int i = 0; i < alto; i++) {
 		for (int j = 0; j < ancho; j++) {
@@ -115,44 +127,66 @@ int ClasificacionSOMCPU()
 	 int* d_Solucion;
 	 float** d_Patrones;
 
+	 //Asignar espacio para los punteros a filas de neuronas
 	 ERROR_CHECK(cudaMalloc((void**)&d_SOM, SOM.Alto * sizeof(TNeurona*)));
+	 //vector de punteros temporal de filas de neuronas
 	 TNeurona** temp_d_som = (TNeurona**)malloc(sizeof(TNeurona*) * SOM.Alto);
+
 	 for (int j = 0; j < SOM.Alto; j++) {
+
+		 //asignar espacio para cada fila de neuronas y guardar el puntero en el vector temporal
 		 ERROR_CHECK(cudaMalloc((void**)&temp_d_som[j], SOM.Ancho * sizeof(TNeurona)));
+		 //fila de neuronas temporal
 		 TNeurona* temp_d_ne = (TNeurona*)malloc(sizeof(TNeurona) * SOM.Ancho);
+
+
 		 for (int i = 0; i < SOM.Ancho; i++) {
+
+			 //asignar espacio para cada vector de pesos de las neuronas
 			 ERROR_CHECK(cudaMalloc((void**)& temp_d_ne[i].pesos, SOM.Dimension * sizeof(float)));
+			 //copiar el vector de pesos al vector de neuronas temporal
 			 ERROR_CHECK(cudaMemcpy(temp_d_ne[i].pesos, SOM.Neurona[j][i].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice));
+			 //copiar el label
 			 temp_d_ne[i].label = SOM.Neurona[j][i].label;
 		 }
+
+		 //copiar cada puntero a una fila de neuronas al vector de punteros a filas
 		 ERROR_CHECK(cudaMemcpy(temp_d_som[j], temp_d_ne, SOM.Ancho * sizeof(TNeurona), cudaMemcpyHostToDevice));
 		 free(temp_d_ne);
 	 }
+	 //copiar el vector de punteros a filas a la gpu
 	 ERROR_CHECK(cudaMemcpy(d_SOM, temp_d_som, SOM.Alto * sizeof(TNeurona*), cudaMemcpyHostToDevice));
 	 free(temp_d_som);
 
-
+	 //asignar espacio al vector solución
 	 ERROR_CHECK(cudaMalloc((void**)&d_Solucion, Patrones.Cantidad * sizeof(int)));
 	 
 
-	 
+	 //asignar espacio al vector de patrones
 	 ERROR_CHECK(cudaMalloc((void**) & d_Patrones, Patrones.Cantidad * sizeof(float*)));
+	 //crear vector de patrones temporal
 	 float** temp_d_ptrs = (float**)malloc(sizeof(float*) * Patrones.Cantidad);
+
 	 for (int i = 0; i < Patrones.Cantidad; i++) {
+
+		 //asignar espacio para cada patrón (vector de pesos)
 		 ERROR_CHECK(cudaMalloc((void**) &temp_d_ptrs[i], Patrones.Dimension * sizeof(float)));
+		 //copiar cada patrón
 		 ERROR_CHECK(cudaMemcpy(temp_d_ptrs[i], Patrones.Pesos[i], Patrones.Dimension * sizeof(float), cudaMemcpyHostToDevice));
 	 }
+
+	 //copiar el vector de patrones a la gpu
 	 ERROR_CHECK(cudaMemcpy(d_Patrones, temp_d_ptrs, sizeof(float*) * Patrones.Cantidad, cudaMemcpyHostToDevice));
 	 free(temp_d_ptrs);
 	 
 	 
 
-	 dim3 block(1);
+	 dim3 block(SOM.Alto, SOM.Ancho);
 	 dim3 grid(Patrones.Cantidad);
 
-	 kernel << <grid, 1 >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, SOM.Dimension);
+	 kernel <<<Patrones.Cantidad, 1>>> (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, Patrones.Cantidad);
 
-
+	 //copiar la solucion de la gpu
 	 ERROR_CHECK(cudaMemcpy(EtiquetaGPU, d_Solucion, (Patrones.Cantidad * sizeof(int)), cudaMemcpyDeviceToHost));
 	 cudaFree(d_SOM);
 	 cudaFree(d_Patrones);
@@ -207,7 +241,7 @@ runTest(int argc, char** argv)
 	
 	// Creación etiquetas resultados para versiones CPU y GPU
 
-	EtiquetaCPU = (int*)malloc(Patrones.Cantidad*sizeof(int));
+	EtiquetaCPU = (int*)malloc(Patrones.Cantidad *sizeof(int));
 	EtiquetaGPU = (int*)malloc(Patrones.Cantidad*sizeof(int));
 	
 	/* Algoritmo a paralelizar */
@@ -236,6 +270,12 @@ runTest(int argc, char** argv)
 	gpu_end_time = getTime();
 	// Comparación de corrección
 	int comprobar = OKCLAS;
+	/*for (int i = 0; i < SOM.Alto;i++) {
+		for (int j = 0;j < SOM.Ancho;j++) {
+			if (EtiquetaGPU[(i * SOM.Ancho) + j] != SOM.Neurona[i][j].label)
+				printf("Neurona mal copiada\n");
+		}
+	}*/
 	for (int i = 0; i<Patrones.Cantidad; i++)
 	{
 		if ((EtiquetaCPU[i] != EtiquetaGPU[i]))
