@@ -31,7 +31,7 @@ typedef LARGE_INTEGER timeStamp;
 double getTime();
 
 
-/*__device__ float CalculaDistanciaGPU(int y, int x, int np, TNeurona** d_Neuronas, float** d_Patrones, int dimension, int alto, int ancho) {
+__device__ float CalculaDistanciaGPU(int y, int x, int np, TNeurona** d_Neuronas, float** d_Patrones, int dimension, int alto, int ancho) {
 	float distancia = 0;
 	if (y >= 0 && y < alto && x >= 0 && x < ancho)
 	{
@@ -40,7 +40,7 @@ double getTime();
 		distancia /= dimension;
 	}
 	return distancia;
-}*/
+}
 
 __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension, int cantidad) {
 	const int tid = blockIdx.x; //Cada bloque es un patrón
@@ -48,20 +48,12 @@ __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_
 	float distanciaMenor = MAXDIST;
 	float dist;
 	int vx, vy;
-	for (int tid = 0; tid < cantidad; tid++) {
 		//Solución de la cpu tal cual (menos recorrero los patrones ya que cada bloque es un patrón)
 		for (int y = 0; y < alto; y++) {
 			for (int x = 0; x < ancho; x++) {
 
 
-				dist = 0;
-				if ((vy + y) >= 0 && (vy + y) < alto && (vx + x) >= 0 && (vx + x) < ancho)
-				{
-					for (int i = 0;i < dimension;i++)
-						dist += fabs(d_Neuronas[vy + y][vx + x].pesos[i] - d_Patrones[tid][i]);
-					dist /= dimension;
-				}
-				distancia = dist;
+				distancia = CalculaDistanciaGPU(y,x,tid,d_Neuronas,d_Patrones,dimension,alto,ancho);
 
 
 				for (vy = -1;vy < 2;vy++)               // Calculo en la vecindad
@@ -70,15 +62,7 @@ __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_
 						if (vx != 0 && vy != 0) {
 
 
-							//Función de CalculaDistancia
-							dist = 0;
-							if ((vy + y) >= 0 && (vy + y) < alto && (vx + x) >= 0 && (vx + x) < ancho)
-							{
-								for (int i = 0;i < dimension;i++)
-									dist += fabs(d_Neuronas[vy + y][vx + x].pesos[i] - d_Patrones[tid][i]);
-								dist /= dimension;
-							}
-							distancia += dist;
+							distancia += CalculaDistanciaGPU(y+vy, x+vx, tid, d_Neuronas, d_Patrones, dimension, alto, ancho);
 						}
 					}
 				if (distancia < distanciaMenor)
@@ -88,7 +72,6 @@ __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_
 				}
 			}
 		}
-	}
 	/*
 	for (int i = 0; i < alto; i++) {
 		for (int j = 0; j < ancho; j++) {
