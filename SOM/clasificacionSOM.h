@@ -130,7 +130,7 @@
 		if (y>=0 && y<SOM.Alto && x>=0 && x<SOM.Ancho)
 		{
 		for (int i=0;i<Patrones.Dimension;i++)
-			distancia+=fabs(SOM.Neurona[y][x].pesos[i]-Patrones.Pesos[np][i]);
+			distancia+=abs(SOM.Neurona[y][x].pesos[i]-Patrones.Pesos[np][i]);
 		distancia/=Patrones.Dimension;
 		}
 		return distancia;
