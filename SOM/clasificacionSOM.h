@@ -90,6 +90,7 @@
 		int i,j;
 		SOM.Alto = Alto;
 		SOM.Ancho = Ancho;
+		SOM.Dimension = Dimension;
 		SOM.Neurona = (TNeurona**)malloc(SOM.Alto*sizeof(TNeurona*));
 		if (SOM.Neurona == NULL) return ERRORCLASS;
 		for (j = 0; j < SOM.Alto; j++)
@@ -130,7 +131,7 @@
 		if (y>=0 && y<SOM.Alto && x>=0 && x<SOM.Ancho)
 		{
 		for (int i=0;i<Patrones.Dimension;i++)
-			distancia+=abs(SOM.Neurona[y][x].pesos[i]-Patrones.Pesos[np][i]);
+			distancia+=fabs(SOM.Neurona[y][x].pesos[i]-Patrones.Pesos[np][i]);
 		distancia/=Patrones.Dimension;
 		}
 		return distancia;
