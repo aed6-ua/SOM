@@ -49,62 +49,62 @@ __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_
 	float* distancia = (float*)distanciaYLabels;
 	int* neuronaLabel = &distanciaYLabels[alto * ancho];
 	float distanciaMenor = MAXDIST;
-	float dist;
 	int vx, vy;
-		//Solución de la cpu tal cual (menos recorrer los patrones ya que cada bloque es un patrón)
-		//for (int y = 0; y < alto; y++) {
-			//for (int x = 0; x < ancho; x++) {
+	int patronesPorBlock = 0;
+	int neuronasPorThread = 0;
 
-				neuronaLabel[j] = d_Neuronas[threadIdx.y][threadIdx.x].label;
-				distancia[j] = CalculaDistanciaGPU(threadIdx.y, threadIdx.x, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
-
-
-				for (vy = -1;vy < 2;vy++)               // Calculo en la vecindad
-					for (vx = -1;vx < 2;vx++)
-					{
-						if (vx != 0 && vy != 0) {
+	//for (int ppb = 0; ppb < patronesPorBlock; ppb++) {
+		//for (int npt = 0; npt < neuronasPorThread; npt++) {
+			neuronaLabel[j] = d_Neuronas[threadIdx.y][threadIdx.x].label;
+			distancia[j] = CalculaDistanciaGPU(threadIdx.y, threadIdx.x, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
 
 
-							distancia[j] += CalculaDistanciaGPU(threadIdx.y + vy, threadIdx.x + vx, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
-						}
-					}
-				int nmed = (alto * ancho) >> 1;
-				int nelem = (alto * ancho);
-				
-				__syncthreads();
-				for (unsigned int s = nmed; s > 0; s >>= 1) {
-					if (j < s) {
-						if (distancia[j] > distancia[s + j]) {
-							distancia[j] = distancia[s + j];
-							neuronaLabel[j] = neuronaLabel[s + j];
-						}
-						if ((nelem & 1) && (j == s - 1)) {
-							if (distancia[j] > distancia[s << 1]) {
-								distancia[j] = distancia[s << 1];
-								neuronaLabel[j] = neuronaLabel[s << 1];
-							}
-						}
-					}
-					nelem = s;
-					__syncthreads();
-				}
-				if (j == 0) {
-					solucion_P[bid] = neuronaLabel[0];
-				}
-				/*if (threadIdx.y == 0 && threadIdx.x == 0)
+			for (vy = -1;vy < 2;vy++)               // Calculo en la vecindad
+				for (vx = -1;vx < 2;vx++)
 				{
-					for (int y = 0; y < alto; y++) {
-						for (int x = 0; x < ancho; x++) {
-							if (distancia[(y * ancho) + x] < distanciaMenor) {
-								distanciaMenor = distancia[(y * ancho) + x];  // Neurona con menor distancia
-								solucion_P[bid] = d_Neuronas[y][x].label;
-							}
+					if (vx != 0 && vy != 0) {
+
+
+						distancia[j] += CalculaDistanciaGPU(threadIdx.y + vy, threadIdx.x + vx, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
+					}
+				}
+			int nmed = (alto * ancho) >> 1;
+			int nelem = (alto * ancho);
+
+			__syncthreads();
+			for (unsigned int s = nmed; s > 0; s >>= 1) {
+				if (j < s) {
+					if (distancia[j] > distancia[s + j]) {
+						distancia[j] = distancia[s + j];
+						neuronaLabel[j] = neuronaLabel[s + j];
+					}
+					if ((nelem & 1) && (j == s - 1)) {
+						if (distancia[j] > distancia[s << 1]) {
+							distancia[j] = distancia[s << 1];
+							neuronaLabel[j] = neuronaLabel[s << 1];
 						}
 					}
-					
-				}*/
-			//}
+				}
+				nelem = s;
+				__syncthreads();
+			}
+			if (j == 0) {
+				solucion_P[bid] = neuronaLabel[0];
+			}
+			/*if (threadIdx.y == 0 && threadIdx.x == 0)
+			{
+				for (int y = 0; y < alto; y++) {
+					for (int x = 0; x < ancho; x++) {
+						if (distancia[(y * ancho) + x] < distanciaMenor) {
+							distanciaMenor = distancia[(y * ancho) + x];  // Neurona con menor distancia
+							solucion_P[bid] = d_Neuronas[y][x].label;
+						}
+					}
+				}
+
+			}*/
 		//}
+	//}
 	/*
 	for (int i = 0; i < alto; i++) {
 		for (int j = 0; j < ancho; j++) {
