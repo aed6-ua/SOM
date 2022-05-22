@@ -73,10 +73,47 @@ int ClasificacionSOMCPU()
 
  int ClasificacionSOMGPU()
 {
+	 int *devPatr1 = 0;
+	 int *devRed = 0;
+	 sTNeurona neurona;
+	 int sizePatr = Patrones.Dimension;
+	 int sizeRed = SOM.Dimension;
 
+	 cudaError_t cudaStatus = cudaMalloc((void**) devPatr1, sizePatr * sizeof(Patrones));
+	 if (cudaStatus != cudaSuccess)
+	 {
+		 fprintf(stderr, "cudaMalloc failed!");
+		 return -1;
+	 }
+	 cudaStatus = cudaMalloc((void**)devRed, sizeRed * sizeof(SOM));
+	 
+	 //tamaño de la neurona = sizeof(int) + sizeRed*sizeof(float)
+	 if (cudaStatus != cudaSuccess)
+	 {
+		 fprintf(stderr, "cudaMalloc failed!");
+		 return -1;
+	 }
+
+	 cudaStatus = cudaMemcpy(devPatr1, Patrones.Pesos , sizePatr * sizeof(Patrones), cudaMemcpyHostToDevice);
+	 if (cudaStatus != cudaSuccess) 
+	 {
+		 fprintf(stderr, "cudaMemcpy failed!");
+		 return -1;
+	 }
+
+	 //Falta red 
+	 cudaMallocPitch();
+
+
+
+	 for (int i = 0; i < 10 ; i++)
+	 {
+
+	 }
 
 	 return OKCLAS;
-}
+}	//Como hemos paralelizado el problema
+
  // ---------------------------------------------------------------
  // ---------------------------------------------------------------
  // ---------------------------------------------------------------
