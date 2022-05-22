@@ -42,75 +42,34 @@ __device__ float CalculaDistanciaGPU(int y, int x, int np, TNeurona** d_Neuronas
 	return distancia;
 }
 
-__global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension, int cantidad) {
-	const int bid = blockIdx.x; //Cada bloque es un patrón
-	int j = (threadIdx.y * blockDim.x) + threadIdx.x; //Id del thread
-	extern __shared__ int distanciaYLabels[]; //Declaro un solo dynamic shared array
-	float* distancia = (float*)distanciaYLabels;
-	int* neuronaLabel = &distanciaYLabels[alto * ancho];
+__global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension, float** d_Distancias) {
+	const int tid = threadIdx.x; //Cada thread es un patrón
+	const int bid = (blockIdx.y * gridDim.x) + blockIdx.x; //Id del block
+	
+	float distancia = CalculaDistanciaGPU(blockIdx.y, blockIdx.x, tid, d_Neuronas, d_Patrones, dimension, alto, ancho);
+	for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
+		for (int vx = -1;vx < 2;vx++)
+			if (vx != 0 && vy != 0)         // No comprobar con la misma neurona
+				distancia += CalculaDistanciaGPU(blockIdx.y + vy, blockIdx.x + vx, tid, d_Neuronas, d_Patrones, dimension, alto, ancho);
+
+	d_Distancias[tid][bid] = distancia;
+}
+
+__global__ void distanciaMin(TNeurona** d_Neuronas, int* solucion_P, float** d_Distancias, int alto, int ancho) {
+	const int tid = threadIdx.x;	
+	const int bid = blockIdx.x;	//Tantos bloques como patrones
 	float distanciaMenor = MAXDIST;
-	int vx, vy;
-	int patronesPorBlock = 0;
-	int neuronasPorThread = 0;
+	int i;
 
-	//for (int ppb = 0; ppb < patronesPorBlock; ppb++) {
-		//for (int npt = 0; npt < neuronasPorThread; npt++) {
-			neuronaLabel[j] = d_Neuronas[threadIdx.y][threadIdx.x].label;
-			distancia[j] = CalculaDistanciaGPU(threadIdx.y, threadIdx.x, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
-
-
-			for (vy = -1;vy < 2;vy++)               // Calculo en la vecindad
-				for (vx = -1;vx < 2;vx++)
-				{
-					if (vx != 0 && vy != 0) {
-
-
-						distancia[j] += CalculaDistanciaGPU(threadIdx.y + vy, threadIdx.x + vx, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
-					}
-				}
-			int nmed = (alto * ancho) >> 1;
-			int nelem = (alto * ancho);
-
-			__syncthreads();
-			for (unsigned int s = nmed; s > 0; s >>= 1) {
-				if (j < s) {
-					if (distancia[j] > distancia[s + j]) {
-						distancia[j] = distancia[s + j];
-						neuronaLabel[j] = neuronaLabel[s + j];
-					}
-					if ((nelem & 1) && (j == s - 1)) {
-						if (distancia[j] > distancia[s << 1]) {
-							distancia[j] = distancia[s << 1];
-							neuronaLabel[j] = neuronaLabel[s << 1];
-						}
-					}
-				}
-				nelem = s;
-				__syncthreads();
+	for (int y = 0; y < alto; y++) {
+		for (int x = 0; x < ancho; x++) {
+			i = (y * ancho) + x;
+			if (d_Distancias[bid][i] < distanciaMenor) {
+				distanciaMenor = d_Distancias[bid][i];
+				solucion_P[bid] = d_Neuronas[y][x].label;
 			}
-			if (j == 0) {
-				solucion_P[bid] = neuronaLabel[0];
-			}
-			/*if (threadIdx.y == 0 && threadIdx.x == 0)
-			{
-				for (int y = 0; y < alto; y++) {
-					for (int x = 0; x < ancho; x++) {
-						if (distancia[(y * ancho) + x] < distanciaMenor) {
-							distanciaMenor = distancia[(y * ancho) + x];  // Neurona con menor distancia
-							solucion_P[bid] = d_Neuronas[y][x].label;
-						}
-					}
-				}
-
-			}*/
-		//}
-	//}
-	/*
-	for (int i = 0; i < alto; i++) {
-		for (int j = 0; j < ancho; j++) {
-			solucion_P[(i * ancho) + j] = d_Neuronas[i][j].label;
 		}
-	}*/
+	}
 }
 
 /*----------------------------------------------------------------------------*/
@@ -160,6 +119,7 @@ int ClasificacionSOMCPU()
 	 
 	 int* d_Solucion;
 	 float** d_Patrones;
+	 float** d_Distancias;
 
 	 //Asignar espacio para los punteros a filas de neuronas
 	 ERROR_CHECK(cudaMalloc((void**)&d_SOM, SOM.Alto * sizeof(TNeurona*)));
@@ -201,24 +161,36 @@ int ClasificacionSOMCPU()
 	 //crear vector de patrones temporal
 	 float** temp_d_ptrs = (float**)malloc(sizeof(float*) * Patrones.Cantidad);
 
+	 //asignar espacio al vector de distancias
+	 ERROR_CHECK(cudaMalloc((void**)&d_Distancias, Patrones.Cantidad * sizeof(float*)));
+	 //crear vector de distancias temporal
+	 float** temp_d_ptrs_d = (float**)malloc(sizeof(float*) * Patrones.Cantidad);
+
 	 for (int i = 0; i < Patrones.Cantidad; i++) {
 
 		 //asignar espacio para cada patrón (vector de pesos)
 		 ERROR_CHECK(cudaMalloc((void**) &temp_d_ptrs[i], Patrones.Dimension * sizeof(float)));
 		 //copiar cada patrón
 		 ERROR_CHECK(cudaMemcpy(temp_d_ptrs[i], Patrones.Pesos[i], Patrones.Dimension * sizeof(float), cudaMemcpyHostToDevice));
+
+		 //asignar espacio para cada distancia (vector de distancias de cada neurona)
+		 ERROR_CHECK(cudaMalloc((void**)&temp_d_ptrs_d[i], SOM.Alto * SOM.Ancho * sizeof(float)));
 	 }
 
 	 //copiar el vector de patrones a la gpu
 	 ERROR_CHECK(cudaMemcpy(d_Patrones, temp_d_ptrs, sizeof(float*) * Patrones.Cantidad, cudaMemcpyHostToDevice));
 	 free(temp_d_ptrs);
-	 
+	 //copiar vector de distancias a la gpu
+	 ERROR_CHECK(cudaMemcpy(d_Distancias, temp_d_ptrs_d, sizeof(float*) * Patrones.Cantidad, cudaMemcpyHostToDevice));
+	 free(temp_d_ptrs_d);
 	 
 
-	 dim3 block(SOM.Alto, SOM.Ancho);
-	 dim3 grid(Patrones.Cantidad);
+	 dim3 block(Patrones.Cantidad);
+	 dim3 grid(SOM.Alto, SOM.Ancho);
 
-	 kernel <<<grid, block, (SOM.Alto * SOM.Ancho * sizeof(float) + (SOM.Alto * SOM.Ancho * sizeof(int))) >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, Patrones.Cantidad);
+	 kernel <<<grid, block >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, d_Distancias);
+
+	 distanciaMin << <Patrones.Cantidad, 1 >> > (d_SOM, d_Solucion, d_Distancias, SOM.Alto, SOM.Ancho);
 
 
 	 //copiar la solucion de la gpu
