@@ -43,17 +43,17 @@ __device__ float CalculaDistanciaGPU(int y, int x, int np, TNeurona** d_Neuronas
 }
 
 __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension, int cantidad) {
-	const int tid = blockIdx.x; //Cada bloque es un patrón
-	float distancia = 0;
+	const int bid = blockIdx.x; //Cada bloque es un patrón
+	extern __shared__ float distancia[];
 	float distanciaMenor = MAXDIST;
 	float dist;
 	int vx, vy;
-		//Solución de la cpu tal cual (menos recorrero los patrones ya que cada bloque es un patrón)
-		for (int y = 0; y < alto; y++) {
-			for (int x = 0; x < ancho; x++) {
+		//Solución de la cpu tal cual (menos recorrer los patrones ya que cada bloque es un patrón)
+		//for (int y = 0; y < alto; y++) {
+			//for (int x = 0; x < ancho; x++) {
 
 
-				distancia = CalculaDistanciaGPU(y,x,tid,d_Neuronas,d_Patrones,dimension,alto,ancho);
+				distancia[(threadIdx.y * blockDim.x) + threadIdx.x] = CalculaDistanciaGPU(threadIdx.y, threadIdx.x, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
 
 
 				for (vy = -1;vy < 2;vy++)               // Calculo en la vecindad
@@ -62,16 +62,24 @@ __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_
 						if (vx != 0 && vy != 0) {
 
 
-							distancia += CalculaDistanciaGPU(y+vy, x+vx, tid, d_Neuronas, d_Patrones, dimension, alto, ancho);
+							distancia[(threadIdx.y * blockDim.x) + threadIdx.x] += CalculaDistanciaGPU(threadIdx.y + vy, threadIdx.x + vx, bid, d_Neuronas, d_Patrones, dimension, alto, ancho);
 						}
 					}
-				if (distancia < distanciaMenor)
+				__syncthreads();
+				if (threadIdx.y == 0 && threadIdx.x == 0)
 				{
-					distanciaMenor = distancia;  // Neurona con menor distancia
-					solucion_P[tid] = d_Neuronas[y][x].label;
+					for (int y = 0; y < alto; y++) {
+						for (int x = 0; x < ancho; x++) {
+							if (distancia[(y * ancho) + x] < distanciaMenor) {
+								distanciaMenor = distancia[(y * ancho) + x];  // Neurona con menor distancia
+								solucion_P[bid] = d_Neuronas[y][x].label;
+							}
+						}
+					}
+					
 				}
-			}
-		}
+			//}
+		//}
 	/*
 	for (int i = 0; i < alto; i++) {
 		for (int j = 0; j < ancho; j++) {
@@ -185,7 +193,7 @@ int ClasificacionSOMCPU()
 	 dim3 block(SOM.Alto, SOM.Ancho);
 	 dim3 grid(Patrones.Cantidad);
 
-	 kernel <<<grid, 1>>> (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, Patrones.Cantidad);
+	 kernel <<<grid, block, (SOM.Alto * SOM.Ancho * sizeof(float)) >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, Patrones.Cantidad);
 
 
 	 //copiar la solucion de la gpu
