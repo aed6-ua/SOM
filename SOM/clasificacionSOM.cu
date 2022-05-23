@@ -31,51 +31,64 @@ typedef LARGE_INTEGER timeStamp;
 double getTime();
 
 
-__device__ float CalculaDistanciaGPU(int y, int x, int np, TNeurona** d_Neuronas, float** d_Patrones, int dimension, int alto, int ancho) {
+__device__ float CalculaDistanciaGPU(int k, int np, float* neuronas, float** d_Patrones, int dimension, int alto, int ancho) {
 	float distancia = 0;
-	if (y >= 0 && y < alto && x >= 0 && x < ancho)
-	{
-		for (int i = 0;i < dimension;i++)
-			distancia += fabs(d_Neuronas[y][x].pesos[i] - d_Patrones[np][i]);
-		distancia /= dimension;
-	}
+	for (int i = 0;i < dimension;i++)
+		distancia += fabs(neuronas[k*dimension+i] - d_Patrones[np][i]);
+	distancia /= dimension;
 	return distancia;
 }
 
 __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_P, int alto, int ancho, int dimension, float** d_Distancias) {
 	const int tid = threadIdx.x; //Cada thread es un patrón
-	const int bid = (blockIdx.y * gridDim.x) + blockIdx.x; //Id del block
+	const int bid = (blockIdx.y * gridDim.x) + blockIdx.x; //Id del block (cada uno es una neurona)
+	extern __shared__ float neuronas[];
+	if (tid < dimension) {
+		neuronas[tid] = d_Neuronas[blockIdx.y][blockIdx.x].pesos[tid];
+	}
+	__syncthreads();
+	if (tid < dimension && blockIdx.y != 0 && blockIdx.x != 0) {
+		neuronas[dimension+tid] = d_Neuronas[blockIdx.y-1][blockIdx.x-1].pesos[tid];
+	}
+	if (tid >= dimension && tid < (dimension*2) && blockIdx.y != 0 && blockIdx.x != (ancho-1)) {
+		neuronas[dimension + tid] = d_Neuronas[blockIdx.y-1][blockIdx.x+1].pesos[(tid-dimension)];
+	}
+	if (tid >= dimension*2 && tid < (dimension * 3) && blockIdx.y != (alto-1) && blockIdx.x != (ancho - 1)) {
+		neuronas[dimension + tid] = d_Neuronas[blockIdx.y+1][blockIdx.x+1].pesos[(tid - (dimension*2))];
+	}
+	if (tid >= dimension * 3 && tid < (dimension * 4) && blockIdx.y != (alto - 1) && blockIdx.x != 0) {
+		neuronas[dimension + tid] = d_Neuronas[blockIdx.y+1][blockIdx.x-1].pesos[(tid - (dimension * 3))];
+	}
 	
-	float distancia = CalculaDistanciaGPU(blockIdx.y, blockIdx.x, tid, d_Neuronas, d_Patrones, dimension, alto, ancho);
-	for (int vy = -1;vy < 2;vy++)               // Calculo en la vecindad
-		for (int vx = -1;vx < 2;vx++)
-			if (vx != 0 && vy != 0)         // No comprobar con la misma neurona
-				distancia += CalculaDistanciaGPU(blockIdx.y + vy, blockIdx.x + vx, tid, d_Neuronas, d_Patrones, dimension, alto, ancho);
+	__syncthreads();
+	float distancia = CalculaDistanciaGPU(0, tid, neuronas, d_Patrones, dimension, alto, ancho);
+	if (blockIdx.y != 0 && blockIdx.x != 0)
+		distancia += CalculaDistanciaGPU(1, tid, neuronas, d_Patrones, dimension, alto, ancho);
+	if (blockIdx.y != 0 && blockIdx.x != (ancho - 1))
+		distancia += CalculaDistanciaGPU(2, tid, neuronas, d_Patrones, dimension, alto, ancho);
+	if (blockIdx.y != (alto - 1) && blockIdx.x != (ancho - 1))
+		distancia += CalculaDistanciaGPU(3, tid, neuronas, d_Patrones, dimension, alto, ancho);
+	if (blockIdx.y != (alto - 1) && blockIdx.x != 0)
+		distancia += CalculaDistanciaGPU(4, tid, neuronas, d_Patrones, dimension, alto, ancho);
+		
 
 	d_Distancias[tid][bid] = distancia;
 }
 
-__global__ void distanciaMin(TNeurona** d_Neuronas, int* solucion_P, float** d_Distancias, int alto, int ancho, int cantidad/*, int dimension*/) {
+__global__ void distanciaMin(TNeurona** d_Neuronas, int* solucion_P, float** d_Distancias, int alto, int ancho, int cantidad) {
 	const int idx = threadIdx.x + blockIdx.x * blockDim.x;
-	//extern __shared__ float distancias[];
 	float distanciaMenor = MAXDIST;
 	int i;
-	/*if (idx < cantidad) {
-		for (int i = 0; i < dimension; i++) {
-			distancias[idx * dimension + i] = d_Distancias[idx][i];
-		}
-	}*/
-
 	if (idx < cantidad)
-	for (int y = 0; y < alto; y++) {
-		for (int x = 0; x < ancho; x++) {
-			i = (y * ancho) + x;
-			if (d_Distancias[idx][i] < distanciaMenor) {
-				distanciaMenor = d_Distancias[idx][i];
-				solucion_P[idx] = d_Neuronas[y][x].label;
+		for (int y = 0; y < alto; y++) {
+			for (int x = 0; x < ancho; x++) {
+				i = (y * ancho) + x;
+				if (d_Distancias[idx][i] < distanciaMenor) {
+					distanciaMenor = d_Distancias[idx][i];
+					solucion_P[idx] = d_Neuronas[y][x].label;
+				}
 			}
 		}
-	}
 }
 
 /*----------------------------------------------------------------------------*/
@@ -194,7 +207,7 @@ int ClasificacionSOMCPU()
 	 dim3 block(Patrones.Cantidad);
 	 dim3 grid(SOM.Alto, SOM.Ancho);
 
-	 kernel <<<grid, block >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, d_Distancias);
+	 kernel <<<grid, block, 5 * Patrones.Dimension * sizeof(float) >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, d_Distancias);
 
 	 int blockSize;   // The launch configurator returned block size 
 	 int minGridSize; // The minimum grid size needed to achieve the 
