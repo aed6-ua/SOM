@@ -55,18 +55,24 @@ __global__ void kernel(TNeurona** d_Neuronas, float** d_Patrones, int* solucion_
 	d_Distancias[tid][bid] = distancia;
 }
 
-__global__ void distanciaMin(TNeurona** d_Neuronas, int* solucion_P, float** d_Distancias, int alto, int ancho) {
-	const int tid = threadIdx.x;	
-	const int bid = blockIdx.x;	//Tantos bloques como patrones
+__global__ void distanciaMin(TNeurona** d_Neuronas, int* solucion_P, float** d_Distancias, int alto, int ancho, int cantidad/*, int dimension*/) {
+	const int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	//extern __shared__ float distancias[];
 	float distanciaMenor = MAXDIST;
 	int i;
+	/*if (idx < cantidad) {
+		for (int i = 0; i < dimension; i++) {
+			distancias[idx * dimension + i] = d_Distancias[idx][i];
+		}
+	}*/
 
+	if (idx < cantidad)
 	for (int y = 0; y < alto; y++) {
 		for (int x = 0; x < ancho; x++) {
 			i = (y * ancho) + x;
-			if (d_Distancias[bid][i] < distanciaMenor) {
-				distanciaMenor = d_Distancias[bid][i];
-				solucion_P[bid] = d_Neuronas[y][x].label;
+			if (d_Distancias[idx][i] < distanciaMenor) {
+				distanciaMenor = d_Distancias[idx][i];
+				solucion_P[idx] = d_Neuronas[y][x].label;
 			}
 		}
 	}
@@ -190,7 +196,17 @@ int ClasificacionSOMCPU()
 
 	 kernel <<<grid, block >> > (d_SOM, d_Patrones, d_Solucion, SOM.Alto, SOM.Ancho, Patrones.Dimension, d_Distancias);
 
-	 distanciaMin << <Patrones.Cantidad, 1 >> > (d_SOM, d_Solucion, d_Distancias, SOM.Alto, SOM.Ancho);
+	 int blockSize;   // The launch configurator returned block size 
+	 int minGridSize; // The minimum grid size needed to achieve the 
+					  // maximum occupancy for a full device launch 
+	 int gridSize;    // The actual grid size needed, based on input size 
+
+	 cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize,
+		 distanciaMin, 0, 0);
+	 // Round up according to array size 
+	 gridSize = (Patrones.Cantidad + blockSize - 1) / blockSize;
+
+	 distanciaMin << <gridSize, blockSize >> > (d_SOM, d_Solucion, d_Distancias, SOM.Alto, SOM.Ancho, Patrones.Cantidad);
 
 
 	 //copiar la solucion de la gpu
@@ -277,12 +293,6 @@ runTest(int argc, char** argv)
 	gpu_end_time = getTime();
 	// Comparación de corrección
 	int comprobar = OKCLAS;
-	/*for (int i = 0; i < SOM.Alto;i++) {
-		for (int j = 0;j < SOM.Ancho;j++) {
-			if (EtiquetaGPU[(i * SOM.Ancho) + j] != SOM.Neurona[i][j].label)
-				printf("Neurona mal copiada\n");
-		}
-	}*/
 	for (int i = 0; i<Patrones.Cantidad; i++)
 	{
 		if ((EtiquetaCPU[i] != EtiquetaGPU[i]))
