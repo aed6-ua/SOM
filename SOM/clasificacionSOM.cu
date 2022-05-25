@@ -165,11 +165,9 @@ int ClasificacionSOMCPU()
 
 		 //copiar cada puntero a una fila de neuronas al vector de punteros a filas
 		 ERROR_CHECK(cudaMemcpy(temp_d_som[j], temp_d_ne, SOM.Ancho * sizeof(TNeurona), cudaMemcpyHostToDevice));
-		 free(temp_d_ne);
 	 }
 	 //copiar el vector de punteros a filas a la gpu
 	 ERROR_CHECK(cudaMemcpy(d_SOM, temp_d_som, SOM.Alto * sizeof(TNeurona*), cudaMemcpyHostToDevice));
-	 free(temp_d_som);
 
 	 //asignar espacio al vector solución
 	 ERROR_CHECK(cudaMalloc((void**)&d_Solucion, Patrones.Cantidad * sizeof(int)));
@@ -198,10 +196,8 @@ int ClasificacionSOMCPU()
 
 	 //copiar el vector de patrones a la gpu
 	 ERROR_CHECK(cudaMemcpy(d_Patrones, temp_d_ptrs, sizeof(float*) * Patrones.Cantidad, cudaMemcpyHostToDevice));
-	 free(temp_d_ptrs);
 	 //copiar vector de distancias a la gpu
 	 ERROR_CHECK(cudaMemcpy(d_Distancias, temp_d_ptrs_d, sizeof(float*) * Patrones.Cantidad, cudaMemcpyHostToDevice));
-	 free(temp_d_ptrs_d);
 	 
 
 	 dim3 block(Patrones.Cantidad);
@@ -224,9 +220,6 @@ int ClasificacionSOMCPU()
 
 	 //copiar la solucion de la gpu
 	 ERROR_CHECK(cudaMemcpy(EtiquetaGPU, d_Solucion, (Patrones.Cantidad * sizeof(int)), cudaMemcpyDeviceToHost));
-	 cudaFree(d_SOM);
-	 cudaFree(d_Patrones);
-	 cudaFree(d_Solucion);
 
 	 return OKCLAS;
 }
