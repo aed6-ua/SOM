@@ -156,9 +156,9 @@ int ClasificacionSOMCPU()
 		 for (int i = 0; i < SOM.Ancho; i++) {
 
 			 //asignar espacio para cada vector de pesos de las neuronas
-			 ERROR_CHECK(cudaMalloc((void**)& temp_d_ne[i].pesos, SOM.Dimension * sizeof(float)));
+			 ERROR_CHECK(cudaMalloc((void**)& temp_d_ne[i].pesos, Patrones.Dimension * sizeof(float)));
 			 //copiar el vector de pesos al vector de neuronas temporal
-			 ERROR_CHECK(cudaMemcpy(temp_d_ne[i].pesos, SOM.Neurona[j][i].pesos, SOM.Dimension * sizeof(float), cudaMemcpyHostToDevice));
+			 ERROR_CHECK(cudaMemcpy(temp_d_ne[i].pesos, SOM.Neurona[j][i].pesos, Patrones.Dimension * sizeof(float), cudaMemcpyHostToDevice));
 			 //copiar el label
 			 temp_d_ne[i].label = SOM.Neurona[j][i].label;
 		 }
